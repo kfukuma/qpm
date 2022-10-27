@@ -1,3 +1,4 @@
+# version 1.1
 import numpy as np
 import quaternion
 
@@ -78,53 +79,6 @@ def qtilt(dec, inc, stkf, dipf):   # tilt-correction
     return atan2d(pprime.y, pprime.x), asind(pprime.z)
 
 
-def qvgp(dec, inc, lat, lon):  # VGP calculation
-    clat = 90. - lat
-    mclat = np.arctan2(2., tand(inc))
-
-    pvec = np.array([cosd(lon)*sind(clat), sind(lon)*sind(clat), cosd(clat)])
-    p = np.quaternion(*pvec)
-
-    # rotate magnetic colatitude around n,
-    #   n: pole of longitudinal great circle passing site
-    zc = np.exp(1j*np.deg2rad(lon))*(-1j)
-    n = np.quaternion(0., np.real(zc), np.imag(zc), 0.)
-    theta1 = mclat
-    q1 = np.exp(0.5*theta1*n)
-
-    # rotate -dec around site                   
-    theta2 = np.deg2rad(-dec)
-    q2 = np.exp(0.5*theta2*p)
-
-    q = q2*q1
-    pprime = q*p*q.inverse()
-
-    return  90.-acosd(pprime.z), atan2d(pprime.y, pprime.x)
-
-
-def qvgpx(slat, slon, plat, plon):  # expected direction from VGP
-    cslat = 90. - slat
-    cplat = 90. - plat
-
-    psvec = np.array([cosd(slon)*sind(cslat), sind(slon)*sind(cslat),  cosd(cslat)])
-    ps = np.quaternion(*psvec)   # position vector of site
-    ppvec = np.array([cosd(plon)*sind(cplat), sind(plon)*sind(cplat),  cosd(cplat)])
-    pp = np.quaternion(*ppvec)   # position vector of VGP
-
-    pspp = ps*pp
-
-    mclat = np.arccos(-pspp.w)         # dot product of psvec and ppvec
-
-    # n: pole of longitudinal great circle passing site
-    zc = np.exp(1j*(np.deg2rad(slon)))*(-1j)
-    n = np.quaternion(0., np.real(zc), np.imag(zc), 0.)
-
-    psppc = np.quaternion(*pspp.imag)  # cross product of psvec and ppvec
-    npsppc = n*psppc.normalized()
-
-    return  acosd(-npsppc.w), atand(2./np.tan(mclat))
-
-
 def qsli(dec1, inc1, dec2, inc2, t):  # spherical linear interpolation
     pvec1 = np.array([cosd(dec1)*cosd(inc1), sind(dec1)*cosd(inc1),  sind(inc1)])
     p1 = np.quaternion(*pvec1)
@@ -134,6 +88,51 @@ def qsli(dec1, inc1, dec2, inc2, t):  # spherical linear interpolation
     pprime = np.power(p2*p1.inverse(), t)*p1
 
     return  atan2d(pprime.y, pprime.x), asind(pprime.z)
+
+
+def qvgp(dec, inc, lat, lon):  # VGP calculation
+    clat = 90. - lat
+    mclat = atan2d(2., tand(inc))
+
+    pvec = np.array([cosd(lon)*sind(clat), sind(lon)*sind(clat),  cosd(clat)])
+    p = np.quaternion(*pvec)
+
+    # slerp of site and north pole by magnetic colatitude 
+    northp = np.quaternion(0,0,0,1)         # north pole
+    t = mclat/clat
+    ptmp = np.power(northp*p.inverse(), t)*p
+
+    # rotate -dec around site                   
+    theta = np.deg2rad(-dec)
+    q = np.exp(0.5*theta*p)
+
+    pprime = q*ptmp*q.inverse()
+
+    return  90.-acosd(pprime.z), atan2d(pprime.y, pprime.x)
+
+
+def qvgpx(slat, slon, plat, plon):  # expected direction from VGP
+    cslat = 90. - slat
+    cplat = 90. - plat
+
+    psvec = np.array([cosd(slon)*sind(cslat), sind(slon)*sind(cslat),  cosd(cslat)])
+    ps = np.quaternion(*psvec)       # position vector of site
+    ppvec = np.array([cosd(plon)*sind(cplat), sind(plon)*sind(cplat),  cosd(cplat)])
+    pp = np.quaternion(*ppvec)       # position vector of VGP
+    northp = np.quaternion(0,0,0,1)  # north pole
+
+    pspp = ps*pp
+    psnp = ps*northp
+
+    mclat = np.arccos(-pspp.w)         # dot product of psvec and ppvec
+    incx = atand(2./np.tan(mclat))
+
+    psppc = np.quaternion(*pspp.imag)  # cross product of psvec and ppvec
+    psnpc = np.quaternion(*psnp.imag)  # cross product of psvec and north pole 
+    npsppc = psppc.normalized()*psnpc.normalized()
+    decx = acosd(-npsppc.w)
+
+    return  acosd(-npsppc.w), atand(2./np.tan(mclat))
 
 
 '''
@@ -166,6 +165,14 @@ dipf =  21.
 print("dec_t, inc_t = ", qpm.qtilt(dec, inc, stkf, dipf))
 # dec_t, inc_t = -74.3, 76.6
 
+dec1 =   5.3                    # qsli
+inc1 =  71.6
+dec2 =   5.3 + 180.0
+inc2 = -81.6     
+t =   0.5                    # 0 =< t =< 1
+print("dec_l, inc_l = ", qpm.qsli(dec1, inc1, dec2, inc2, t))
+# dec_l, inc_l = 5.3, -13.4
+
 dec = 154.0                   # qvgp
 inc = -58.0                    
 lat =  45.5                   # in deg, +, -: north, south
@@ -179,13 +186,5 @@ plat =  77.3                   #       in deg, +, -: north, south
 plon =  154.7                  #       in deg, +, -: east, west or 0-360
 print("dec_x, inc_x = ", qpm.qvgpx(slat, slon, plat, plon))
 # dec_x inc_x = 11.0, 63.0
-
-dec1 =   5.3                    # qsli
-inc1 =  71.6
-dec2 =   5.3 + 180.0
-inc2 = -81.6     
-t =   0.5                    # 0 =< t =< 1
-print("dec_l, inc_l = ", qpm.qsli(dec1, inc1, dec2, inc2, t))
-# dec_l, inc_l = 5.3, -13.4
 
 '''
